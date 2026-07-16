@@ -11,11 +11,16 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
   ],
 });
 
 // userId -> channelId du salon "laisse"
 const leashed = new Map();
+
+// Set des salons en mode "image only"
+const imageOnlyChannels = new Set();
 
 client.once('ready', () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
@@ -62,6 +67,28 @@ client.on('interactionCreate', async (interaction) => {
     leashed.delete(user.id);
     return interaction.reply(`🔓 ${user} n'est plus en laisse.`);
   }
+
+  if (interaction.commandName === 'image') {
+    const sub = interaction.options.getSubcommand();
+    const salon = interaction.options.getChannel('salon');
+
+    if (salon.type !== ChannelType.GuildText) {
+      return interaction.reply({ content: '❌ Le salon choisi doit être un salon texte.', ephemeral: true });
+    }
+
+    if (sub === 'add') {
+      imageOnlyChannels.add(salon.id);
+      return interaction.reply(`🖼️ ${salon} est maintenant en mode image only. Tout message sans image sera supprimé automatiquement.`);
+    }
+
+    if (sub === 'del') {
+      if (!imageOnlyChannels.has(salon.id)) {
+        return interaction.reply({ content: `${salon} n'est pas en mode image only.`, ephemeral: true });
+      }
+      imageOnlyChannels.delete(salon.id);
+      return interaction.reply(`✅ ${salon} n'est plus en mode image only.`);
+    }
+  }
 });
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
@@ -76,6 +103,24 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
       await newState.member.voice.setChannel(leashChannelId);
     } catch (err) {
       console.error(`Impossible de ramener ${newState.member.user.tag} :`, err.message);
+    }
+  }
+});
+
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  if (!imageOnlyChannels.has(message.channel.id)) return;
+
+  // On autorise le message s'il contient au moins une pièce jointe de type image
+  const hasImage = message.attachments.some(att =>
+    att.contentType && att.contentType.startsWith('image/')
+  );
+
+  if (!hasImage) {
+    try {
+      await message.delete();
+    } catch (err) {
+      console.error('Impossible de supprimer le message :', err.message);
     }
   }
 });
