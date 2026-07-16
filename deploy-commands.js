@@ -24,6 +24,27 @@ const commands = [
         .setDescription('Utilisateur à libérer')
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('image')
+    .setDescription('Gère les salons "image only"')
+    .addSubcommand(sub =>
+      sub.setName('add')
+        .setDescription('Active le mode image only sur un salon')
+        .addChannelOption(opt =>
+          opt.setName('salon')
+            .setDescription('Salon texte à passer en image only')
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(true)))
+    .addSubcommand(sub =>
+      sub.setName('del')
+        .setDescription('Désactive le mode image only sur un salon')
+        .addChannelOption(opt =>
+          opt.setName('salon')
+            .setDescription('Salon texte à désactiver')
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(true)))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
