@@ -79,6 +79,30 @@ const commands = [
         .setDescription('Utilisateur à arrêter')
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('renomme-random')
+    .setDescription('Change le pseudo au hasard toutes les 3 secondes pendant une durée donnée')
+    .addUserOption(opt =>
+      opt.setName('user')
+        .setDescription('Utilisateur à renommer')
+        .setRequired(true))
+    .addIntegerOption(opt =>
+      opt.setName('duree')
+        .setDescription('Durée en secondes')
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(600))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('unrenomme-random')
+    .setDescription("Arrête le renommage aléatoire et restaure le pseudo d'origine")
+    .addUserOption(opt =>
+      opt.setName('user')
+        .setDescription('Utilisateur à restaurer')
+        .setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
