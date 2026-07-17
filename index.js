@@ -217,8 +217,10 @@ client.on('interactionCreate', async (interaction) => {
       if (!currentMember) return;
 
       const randomName = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
-      await currentMember.setNickname(randomName).catch(() => {});
-    }, 3000);
+      await currentMember.setNickname(randomName).catch(err => {
+        console.error(`Impossible de renommer ${user.tag} :`, err.message);
+      });
+    }, 2000);
 
     // Arrêt automatique après la durée demandée
     setTimeout(() => {
