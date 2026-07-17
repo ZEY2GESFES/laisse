@@ -82,7 +82,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('renomme-random')
-    .setDescription('Change le pseudo au hasard toutes les 3 secondes pendant une durée donnée')
+    .setDescription('Change le pseudo au hasard toutes les 2 secondes pendant une durée donnée')
     .addUserOption(opt =>
       opt.setName('user')
         .setDescription('Utilisateur à renommer')
@@ -103,6 +103,34 @@ const commands = [
         .setDescription('Utilisateur à restaurer')
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('miroir')
+    .setDescription("Rejoue la voix de l'utilisateur avec un délai (le bot rejoint son salon vocal)")
+    .addUserOption(opt =>
+      opt.setName('user')
+        .setDescription('Utilisateur à mirroiter')
+        .setRequired(true))
+    .addIntegerOption(opt =>
+      opt.setName('delai')
+        .setDescription("Délai avant rejeu, en secondes (défaut : 3)")
+        .setRequired(false)
+        .setMinValue(1)
+        .setMaxValue(30))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('unmiroir')
+    .setDescription('Arrête le miroir vocal en cours')
+    .addUserOption(opt =>
+      opt.setName('user')
+        .setDescription('Utilisateur à arrêter')
+        .setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('help')
+    .setDescription('Affiche la liste des commandes du bot'),
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -119,3 +147,5 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     console.error(err);
   }
 })();
+ENDOFFILE
+echo "OK"
