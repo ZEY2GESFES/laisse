@@ -25,6 +25,16 @@ const imageOnlyChannels = new Set();
 // userId -> { intervalId, interaction, vocal1, vocal2 } (troll en cours)
 const activeTrolls = new Map();
 
+// userId -> { intervalId, originalNick } (renommage aléatoire en cours)
+const activeRenames = new Map();
+
+const RANDOM_NAMES = [
+  'Patate', 'Nouille', 'Fromage qui pue', 'Escargot Ninja', 'Baguette Magique',
+  'Chaussette Perdue', 'Camembert Explosif', 'Zébulon', 'Girafe Timide',
+  'Sanglier Discret', 'Pigeon Voyageur', 'Crevette Fantôme', 'Yaourt Nature',
+  'Radis Sauvage', 'Champignon Suspect',
+];
+
 async function stopTroll(userId, reason) {
   const troll = activeTrolls.get(userId);
   if (!troll) return false;
@@ -34,6 +44,25 @@ async function stopTroll(userId, reason) {
 
   if (reason) {
     await troll.interaction.followUp(reason).catch(() => {});
+  }
+
+  return true;
+}
+
+async function stopRename(guild, userId, reason, interaction) {
+  const rename = activeRenames.get(userId);
+  if (!rename) return false;
+
+  clearInterval(rename.intervalId);
+  activeRenames.delete(userId);
+
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (member) {
+    await member.setNickname(rename.originalNick).catch(() => {});
+  }
+
+  if (reason && interaction) {
+    await interaction.followUp(reason).catch(() => {});
   }
 
   return true;
@@ -166,6 +195,49 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     await stopTroll(user.id, `🛑 Troll arrêté sur ${user}.`);
+    return interaction.reply({ content: 'Fait.', ephemeral: true });
+  }
+
+  if (interaction.commandName === 'renomme-random') {
+    const user = interaction.options.getUser('user');
+    const duree = interaction.options.getInteger('duree');
+
+    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    if (!member) {
+      return interaction.reply({ content: "❌ Membre introuvable sur ce serveur.", ephemeral: true });
+    }
+
+    // Si un renommage est déjà en cours sur cette personne, on l'arrête d'abord (sans message)
+    await stopRename(interaction.guild, user.id, null, null);
+
+    const originalNick = member.nickname; // null = pas de pseudo custom (utilise le nom du compte)
+
+    const intervalId = setInterval(async () => {
+      const currentMember = await interaction.guild.members.fetch(user.id).catch(() => null);
+      if (!currentMember) return;
+
+      const randomName = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
+      await currentMember.setNickname(randomName).catch(() => {});
+    }, 3000);
+
+    // Arrêt automatique après la durée demandée
+    setTimeout(() => {
+      stopRename(interaction.guild, user.id, `✅ Renommage terminé sur ${user}, pseudo restauré.`, interaction);
+    }, duree * 1000);
+
+    activeRenames.set(user.id, { intervalId, originalNick });
+
+    return interaction.reply(`🎭 ${user} va être renommé aléatoirement toutes les 3 secondes pendant ${duree} secondes.`);
+  }
+
+  if (interaction.commandName === 'unrenomme-random') {
+    const user = interaction.options.getUser('user');
+
+    if (!activeRenames.has(user.id)) {
+      return interaction.reply({ content: `Aucun renommage en cours sur ${user}.`, ephemeral: true });
+    }
+
+    await stopRename(interaction.guild, user.id, `🛑 Renommage arrêté sur ${user}, pseudo restauré.`, interaction);
     return interaction.reply({ content: 'Fait.', ephemeral: true });
   }
 });
