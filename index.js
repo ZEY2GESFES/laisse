@@ -22,8 +22,17 @@ const leashed = new Map();
 // Set des salons en mode "image only"
 const imageOnlyChannels = new Set();
 
-// userId -> intervalId (troll en cours)
+// userId -> { intervalId, timeoutId } (troll en cours)
 const activeTrolls = new Map();
+
+function stopTroll(userId) {
+  const troll = activeTrolls.get(userId);
+  if (!troll) return false;
+  clearInterval(troll.intervalId);
+  clearTimeout(troll.timeoutId);
+  activeTrolls.delete(userId);
+  return true;
+}
 
 client.once('ready', () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
@@ -109,26 +118,25 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     // Si un troll est déjà en cours sur cette personne, on l'arrête d'abord
-    if (activeTrolls.has(user.id)) {
-      clearInterval(activeTrolls.get(user.id).intervalId);
-      activeTrolls.delete(user.id);
-    }
+    stopTroll(user.id);
 
     let toggle = true;
     const intervalId = setInterval(async () => {
+      // Si la personne n'est pas en vocal (déco), on ne fait rien mais on continue
+      // d'essayer au prochain tick tant que le troll n'est pas arrêté manuellement.
+      const currentMember = await interaction.guild.members.fetch(user.id).catch(() => null);
+      if (!currentMember || !currentMember.voice.channelId) return;
+
       try {
-        await member.voice.setChannel(toggle ? vocal1 : vocal2);
+        await currentMember.voice.setChannel(toggle ? vocal1 : vocal2);
         toggle = !toggle;
       } catch (err) {
-        // L'utilisateur a quitté le vocal ou une erreur est survenue : on arrête
-        clearInterval(intervalId);
-        activeTrolls.delete(user.id);
+        // Erreur ponctuelle (rate limit, permissions...) : on ignore et on continue
       }
     }, 1000);
 
     const timeoutId = setTimeout(() => {
-      clearInterval(intervalId);
-      activeTrolls.delete(user.id);
+      stopTroll(user.id);
     }, duree * 1000);
 
     activeTrolls.set(user.id, { intervalId, timeoutId });
@@ -136,7 +144,17 @@ client.on('interactionCreate', async (interaction) => {
     // Premier déplacement immédiat
     await member.voice.setChannel(vocal1).catch(() => {});
 
-    return interaction.reply(`😈 ${user} va rebondir entre ${vocal1} et ${vocal2} pendant ${duree} secondes.`);
+    return interaction.reply(`😈 ${user} va rebondir entre ${vocal1} et ${vocal2} pendant ${duree} secondes. Ça continue même s'il quitte et revient en vocal.`);
+  }
+
+  if (interaction.commandName === 'untroll') {
+    const user = interaction.options.getUser('user');
+
+    if (!stopTroll(user.id)) {
+      return interaction.reply({ content: `Aucun troll en cours sur ${user}.`, ephemeral: true });
+    }
+
+    return interaction.reply(`🛑 Troll arrêté sur ${user}.`);
   }
 });
 
