@@ -33,7 +33,7 @@ async function stopTroll(userId, reason) {
   activeTrolls.delete(userId);
 
   if (reason) {
-    await troll.interaction.editReply(reason).catch(() => {});
+    await troll.interaction.followUp(reason).catch(() => {});
   }
 
   return true;
@@ -166,7 +166,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     await stopTroll(user.id, `🛑 Troll arrêté sur ${user}.`);
-    return interaction.reply({ content: `🛑 Troll arrêté sur ${user}.`, ephemeral: true });
+    return interaction.reply({ content: 'Fait.', ephemeral: true });
   }
 });
 
