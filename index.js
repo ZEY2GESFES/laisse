@@ -5,6 +5,16 @@ const {
   PermissionFlagsBits,
   ChannelType,
 } = require('discord.js');
+const {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  StreamType,
+  EndBehaviorType,
+  entersState,
+  VoiceConnectionStatus,
+} = require('@discordjs/voice');
+const { PassThrough } = require('stream');
 
 const client = new Client({
   intents: [
@@ -27,6 +37,9 @@ const activeTrolls = new Map();
 
 // userId -> { intervalId, originalNick } (renommage aléatoire en cours)
 const activeRenames = new Map();
+
+// userId -> { connection, player, receiver, speakingHandler } (miroir vocal en cours)
+const activeMirrors = new Map();
 
 const RANDOM_NAMES = [
   'Patate', 'Nouille', 'Fromage qui pue', 'Escargot Ninja', 'Baguette Magique',
@@ -68,6 +81,16 @@ async function stopRename(guild, userId, reason, interaction) {
   return true;
 }
 
+function stopMirror(userId) {
+  const mirror = activeMirrors.get(userId);
+  if (!mirror) return false;
+
+  mirror.receiver.speaking.off('start', mirror.speakingHandler);
+  mirror.connection.destroy();
+  activeMirrors.delete(userId);
+  return true;
+}
+
 client.once('ready', () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
 });
@@ -75,7 +98,27 @@ client.once('ready', () => {
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // Double vérification (en plus des permissions par défaut de la commande)
+  if (interaction.commandName === 'help') {
+    const message = [
+      '**📋 Commandes du bot (admin uniquement, sauf /help)**',
+      '',
+      '`/laisse [user] [vocal]` — force la personne à rester dans ce salon vocal',
+      '`/unlaisse [user]` — libère la personne',
+      '`/image add [salon]` — mode image only sur un salon (messages sans image supprimés)',
+      '`/image del [salon]` — désactive le mode image only',
+      '`/troll [user] [vocal1] [vocal2] [duree]` — fait rebondir la personne entre 2 salons',
+      '`/untroll [user]` — arrête le troll en cours',
+      '`/renomme-random [user] [duree]` — change le pseudo au hasard',
+      '`/unrenomme-random [user]` — arrête et restaure le pseudo',
+      '`/miroir [user] [delai]` — rejoue sa voix avec un délai',
+      '`/unmiroir [user]` — arrête le miroir vocal',
+      '`/help` — affiche ce message',
+    ].join('\n');
+
+    return interaction.reply({ content: message, ephemeral: true });
+  }
+
+  // Toutes les autres commandes sont réservées aux administrateurs
   if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
     return interaction.reply({ content: '❌ Réservé aux administrateurs.', ephemeral: true });
   }
@@ -229,7 +272,7 @@ client.on('interactionCreate', async (interaction) => {
 
     activeRenames.set(user.id, { intervalId, originalNick });
 
-    return interaction.reply(`🎭 ${user} va être renommé aléatoirement toutes les 3 secondes pendant ${duree} secondes.`);
+    return interaction.reply(`🎭 ${user} va être renommé aléatoirement toutes les 2 secondes pendant ${duree} secondes.`);
   }
 
   if (interaction.commandName === 'unrenomme-random') {
@@ -241,6 +284,79 @@ client.on('interactionCreate', async (interaction) => {
 
     await stopRename(interaction.guild, user.id, `🛑 Renommage arrêté sur ${user}, pseudo restauré.`, interaction);
     return interaction.reply({ content: 'Fait.', ephemeral: true });
+  }
+
+  if (interaction.commandName === 'miroir') {
+    const user = interaction.options.getUser('user');
+    const delai = interaction.options.getInteger('delai') || 3;
+
+    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    if (!member || !member.voice.channelId) {
+      return interaction.reply({ content: "❌ Cet utilisateur n'est pas en vocal.", ephemeral: true });
+    }
+
+    // Si un miroir est déjà en cours sur cette personne, on l'arrête d'abord
+    stopMirror(user.id);
+
+    await interaction.deferReply();
+
+    let connection;
+    try {
+      connection = joinVoiceChannel({
+        channelId: member.voice.channelId,
+        guildId: interaction.guild.id,
+        adapterCreator: interaction.guild.voiceAdapterCreator,
+        selfDeaf: false,
+        selfMute: false,
+      });
+      await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
+    } catch (err) {
+      console.error('Impossible de rejoindre le salon vocal :', err.message);
+      return interaction.editReply('❌ Impossible de rejoindre le salon vocal (permissions manquantes ?).');
+    }
+
+    const player = createAudioPlayer();
+    connection.subscribe(player);
+
+    const receiver = connection.receiver;
+
+    const speakingHandler = (speakingUserId) => {
+      if (speakingUserId !== user.id) return;
+
+      const opusStream = receiver.subscribe(user.id, {
+        end: { behavior: EndBehaviorType.AfterSilence, duration: 300 },
+      });
+
+      const chunks = [];
+      opusStream.on('data', chunk => chunks.push(chunk));
+      opusStream.on('end', () => {
+        if (chunks.length === 0) return;
+        setTimeout(() => {
+          if (!activeMirrors.has(user.id)) return; // le miroir a été arrêté entre-temps
+          const passthrough = new PassThrough();
+          for (const chunk of chunks) passthrough.write(chunk);
+          passthrough.end();
+          const resource = createAudioResource(passthrough, { inputType: StreamType.Opus });
+          player.play(resource);
+        }, delai * 1000);
+      });
+    };
+
+    receiver.speaking.on('start', speakingHandler);
+
+    activeMirrors.set(user.id, { connection, player, receiver, speakingHandler });
+
+    return interaction.editReply(`🪞 Miroir activé sur ${user} : sa voix sera rejouée avec ${delai}s de délai.`);
+  }
+
+  if (interaction.commandName === 'unmiroir') {
+    const user = interaction.options.getUser('user');
+
+    if (!stopMirror(user.id)) {
+      return interaction.reply({ content: `Aucun miroir en cours sur ${user}.`, ephemeral: true });
+    }
+
+    return interaction.reply(`🛑 Miroir arrêté sur ${user}.`);
   }
 });
 
@@ -279,3 +395,5 @@ client.on('messageCreate', async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+ENDOFFILE
+echo "OK"
