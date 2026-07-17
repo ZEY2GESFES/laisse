@@ -29,7 +29,6 @@ function stopTroll(userId) {
   const troll = activeTrolls.get(userId);
   if (!troll) return false;
   clearInterval(troll.intervalId);
-  clearTimeout(troll.timeoutId);
   activeTrolls.delete(userId);
   return true;
 }
@@ -121,11 +120,16 @@ client.on('interactionCreate', async (interaction) => {
     stopTroll(user.id);
 
     let toggle = true;
+    let remaining = duree;
+
     const intervalId = setInterval(async () => {
-      // Si la personne n'est pas en vocal (déco), on ne fait rien mais on continue
-      // d'essayer au prochain tick tant que le troll n'est pas arrêté manuellement.
       const currentMember = await interaction.guild.members.fetch(user.id).catch(() => null);
+
+      // Pas en vocal : on met le décompte en pause, on ne fait rien ce tick
       if (!currentMember || !currentMember.voice.channelId) return;
+
+      // La personne est en vocal : le temps décompte
+      remaining -= 1;
 
       try {
         await currentMember.voice.setChannel(toggle ? vocal1 : vocal2);
@@ -133,13 +137,13 @@ client.on('interactionCreate', async (interaction) => {
       } catch (err) {
         // Erreur ponctuelle (rate limit, permissions...) : on ignore et on continue
       }
+
+      if (remaining <= 0) {
+        stopTroll(user.id);
+      }
     }, 1000);
 
-    const timeoutId = setTimeout(() => {
-      stopTroll(user.id);
-    }, duree * 1000);
-
-    activeTrolls.set(user.id, { intervalId, timeoutId });
+    activeTrolls.set(user.id, { intervalId });
 
     // Premier déplacement immédiat
     await member.voice.setChannel(vocal1).catch(() => {});
