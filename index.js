@@ -5,16 +5,6 @@ const {
   PermissionFlagsBits,
   ChannelType,
 } = require('discord.js');
-const {
-  joinVoiceChannel,
-  createAudioPlayer,
-  createAudioResource,
-  StreamType,
-  EndBehaviorType,
-  entersState,
-  VoiceConnectionStatus,
-} = require('@discordjs/voice');
-const { PassThrough } = require('stream');
 
 const client = new Client({
   intents: [
@@ -38,8 +28,8 @@ const activeTrolls = new Map();
 // userId -> { intervalId, originalNick } (renommage aléatoire en cours)
 const activeRenames = new Map();
 
-// userId -> { connection, player, receiver, speakingHandler } (miroir vocal en cours)
-const activeMirrors = new Map();
+// Set des utilisateurs autorisés à utiliser les commandes (en plus des admins)
+const whitelist = new Set();
 
 const RANDOM_NAMES = [
   'Patate', 'Nouille', 'Fromage qui pue', 'Escargot Ninja', 'Baguette Magique',
@@ -47,6 +37,12 @@ const RANDOM_NAMES = [
   'Sanglier Discret', 'Pigeon Voyageur', 'Crevette Fantôme', 'Yaourt Nature',
   'Radis Sauvage', 'Champignon Suspect',
 ];
+
+// Commandes réservées aux administrateurs uniquement, jamais utilisables via whitelist
+const ADMIN_ONLY_COMMANDS = ['wl', 'unwl'];
+
+// Commande accessible à tout le monde, sans restriction
+const PUBLIC_COMMANDS = ['help'];
 
 async function stopTroll(userId, reason) {
   const troll = activeTrolls.get(userId);
@@ -81,16 +77,6 @@ async function stopRename(guild, userId, reason, interaction) {
   return true;
 }
 
-function stopMirror(userId) {
-  const mirror = activeMirrors.get(userId);
-  if (!mirror) return false;
-
-  mirror.receiver.speaking.off('start', mirror.speakingHandler);
-  mirror.connection.destroy();
-  activeMirrors.delete(userId);
-  return true;
-}
-
 client.once('ready', () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
 });
@@ -98,10 +84,28 @@ client.once('ready', () => {
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
+  const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+  const isWhitelisted = whitelist.has(interaction.user.id);
+
+  if (!PUBLIC_COMMANDS.includes(interaction.commandName)) {
+    if (ADMIN_ONLY_COMMANDS.includes(interaction.commandName)) {
+      if (!isAdmin) {
+        return interaction.reply({ content: '❌ Réservé aux administrateurs.', ephemeral: true });
+      }
+    } else if (!isAdmin && !isWhitelisted) {
+      return interaction.reply({ content: "❌ Tu dois être administrateur ou whitelist (/wl) pour utiliser cette commande.", ephemeral: true });
+    }
+  }
+
   if (interaction.commandName === 'help') {
     const message = [
-      '**📋 Commandes du bot (admin uniquement, sauf /help)**',
+      '**📋 Commandes du bot**',
       '',
+      '**Admin uniquement**',
+      '`/wl [user]` — autorise un utilisateur à utiliser les commandes',
+      '`/unwl [user]` — retire cette autorisation',
+      '',
+      '**Admin ou whitelist**',
       '`/laisse [user] [vocal]` — force la personne à rester dans ce salon vocal',
       '`/unlaisse [user]` — libère la personne',
       '`/image add [salon]` — mode image only sur un salon (messages sans image supprimés)',
@@ -110,17 +114,24 @@ client.on('interactionCreate', async (interaction) => {
       '`/untroll [user]` — arrête le troll en cours',
       '`/renomme-random [user] [duree]` — change le pseudo au hasard',
       '`/unrenomme-random [user]` — arrête et restaure le pseudo',
-      '`/miroir [user] [delai]` — rejoue sa voix avec un délai',
-      '`/unmiroir [user]` — arrête le miroir vocal',
+      '',
+      '**Tout le monde**',
       '`/help` — affiche ce message',
     ].join('\n');
 
     return interaction.reply({ content: message, ephemeral: true });
   }
 
-  // Toutes les autres commandes sont réservées aux administrateurs
-  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-    return interaction.reply({ content: '❌ Réservé aux administrateurs.', ephemeral: true });
+  if (interaction.commandName === 'wl') {
+    const user = interaction.options.getUser('user');
+    whitelist.add(user.id);
+    return interaction.reply(`✅ ${user} peut maintenant utiliser les commandes du bot.`);
+  }
+
+  if (interaction.commandName === 'unwl') {
+    const user = interaction.options.getUser('user');
+    whitelist.delete(user.id);
+    return interaction.reply(`✅ ${user} ne peut plus utiliser les commandes du bot.`);
   }
 
   if (interaction.commandName === 'laisse') {
@@ -285,79 +296,6 @@ client.on('interactionCreate', async (interaction) => {
     await stopRename(interaction.guild, user.id, `🛑 Renommage arrêté sur ${user}, pseudo restauré.`, interaction);
     return interaction.reply({ content: 'Fait.', ephemeral: true });
   }
-
-  if (interaction.commandName === 'miroir') {
-    const user = interaction.options.getUser('user');
-    const delai = interaction.options.getInteger('delai') || 3;
-
-    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-    if (!member || !member.voice.channelId) {
-      return interaction.reply({ content: "❌ Cet utilisateur n'est pas en vocal.", ephemeral: true });
-    }
-
-    // Si un miroir est déjà en cours sur cette personne, on l'arrête d'abord
-    stopMirror(user.id);
-
-    await interaction.deferReply();
-
-    let connection;
-    try {
-      connection = joinVoiceChannel({
-        channelId: member.voice.channelId,
-        guildId: interaction.guild.id,
-        adapterCreator: interaction.guild.voiceAdapterCreator,
-        selfDeaf: false,
-        selfMute: false,
-      });
-      await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
-    } catch (err) {
-      console.error('Impossible de rejoindre le salon vocal :', err.message);
-      return interaction.editReply('❌ Impossible de rejoindre le salon vocal (permissions manquantes ?).');
-    }
-
-    const player = createAudioPlayer();
-    connection.subscribe(player);
-
-    const receiver = connection.receiver;
-
-    const speakingHandler = (speakingUserId) => {
-      if (speakingUserId !== user.id) return;
-
-      const opusStream = receiver.subscribe(user.id, {
-        end: { behavior: EndBehaviorType.AfterSilence, duration: 300 },
-      });
-
-      const chunks = [];
-      opusStream.on('data', chunk => chunks.push(chunk));
-      opusStream.on('end', () => {
-        if (chunks.length === 0) return;
-        setTimeout(() => {
-          if (!activeMirrors.has(user.id)) return; // le miroir a été arrêté entre-temps
-          const passthrough = new PassThrough();
-          for (const chunk of chunks) passthrough.write(chunk);
-          passthrough.end();
-          const resource = createAudioResource(passthrough, { inputType: StreamType.Opus });
-          player.play(resource);
-        }, delai * 1000);
-      });
-    };
-
-    receiver.speaking.on('start', speakingHandler);
-
-    activeMirrors.set(user.id, { connection, player, receiver, speakingHandler });
-
-    return interaction.editReply(`🪞 Miroir activé sur ${user} : sa voix sera rejouée avec ${delai}s de délai.`);
-  }
-
-  if (interaction.commandName === 'unmiroir') {
-    const user = interaction.options.getUser('user');
-
-    if (!stopMirror(user.id)) {
-      return interaction.reply({ content: `Aucun miroir en cours sur ${user}.`, ephemeral: true });
-    }
-
-    return interaction.reply(`🛑 Miroir arrêté sur ${user}.`);
-  }
 });
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
@@ -393,3 +331,5 @@ client.on('messageCreate', async (message) => {
     }
   }
 });
+
+client.login(process.env.DISCORD_TOKEN);
