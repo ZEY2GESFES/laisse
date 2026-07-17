@@ -45,6 +45,31 @@ const commands = [
             .addChannelTypes(ChannelType.GuildText)
             .setRequired(true)))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('troll')
+    .setDescription('Fait rebondir un utilisateur entre deux salons vocaux pendant une durée donnée')
+    .addUserOption(opt =>
+      opt.setName('user')
+        .setDescription('Utilisateur à trolls')
+        .setRequired(true))
+    .addChannelOption(opt =>
+      opt.setName('vocal1')
+        .setDescription('Premier salon vocal')
+        .addChannelTypes(ChannelType.GuildVoice)
+        .setRequired(true))
+    .addChannelOption(opt =>
+      opt.setName('vocal2')
+        .setDescription('Deuxième salon vocal')
+        .addChannelTypes(ChannelType.GuildVoice)
+        .setRequired(true))
+    .addIntegerOption(opt =>
+      opt.setName('duree')
+        .setDescription('Durée en secondes')
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(600))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
