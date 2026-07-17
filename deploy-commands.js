@@ -70,6 +70,15 @@ const commands = [
         .setMinValue(1)
         .setMaxValue(600))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('untroll')
+    .setDescription("Arrête le troll en cours sur un utilisateur")
+    .addUserOption(opt =>
+      opt.setName('user')
+        .setDescription('Utilisateur à arrêter')
+        .setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
