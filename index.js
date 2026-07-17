@@ -22,6 +22,9 @@ const leashed = new Map();
 // Set des salons en mode "image only"
 const imageOnlyChannels = new Set();
 
+// userId -> intervalId (troll en cours)
+const activeTrolls = new Map();
+
 client.once('ready', () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
 });
@@ -88,6 +91,52 @@ client.on('interactionCreate', async (interaction) => {
       imageOnlyChannels.delete(salon.id);
       return interaction.reply(`✅ ${salon} n'est plus en mode image only.`);
     }
+  }
+
+  if (interaction.commandName === 'troll') {
+    const user = interaction.options.getUser('user');
+    const vocal1 = interaction.options.getChannel('vocal1');
+    const vocal2 = interaction.options.getChannel('vocal2');
+    const duree = interaction.options.getInteger('duree');
+
+    if (vocal1.type !== ChannelType.GuildVoice || vocal2.type !== ChannelType.GuildVoice) {
+      return interaction.reply({ content: '❌ Les deux salons doivent être des salons vocaux.', ephemeral: true });
+    }
+
+    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    if (!member || !member.voice.channelId) {
+      return interaction.reply({ content: "❌ Cet utilisateur n'est pas en vocal.", ephemeral: true });
+    }
+
+    // Si un troll est déjà en cours sur cette personne, on l'arrête d'abord
+    if (activeTrolls.has(user.id)) {
+      clearInterval(activeTrolls.get(user.id).intervalId);
+      activeTrolls.delete(user.id);
+    }
+
+    let toggle = true;
+    const intervalId = setInterval(async () => {
+      try {
+        await member.voice.setChannel(toggle ? vocal1 : vocal2);
+        toggle = !toggle;
+      } catch (err) {
+        // L'utilisateur a quitté le vocal ou une erreur est survenue : on arrête
+        clearInterval(intervalId);
+        activeTrolls.delete(user.id);
+      }
+    }, 3000);
+
+    const timeoutId = setTimeout(() => {
+      clearInterval(intervalId);
+      activeTrolls.delete(user.id);
+    }, duree * 1000);
+
+    activeTrolls.set(user.id, { intervalId, timeoutId });
+
+    // Premier déplacement immédiat
+    await member.voice.setChannel(vocal1).catch(() => {});
+
+    return interaction.reply(`😈 ${user} va rebondir entre ${vocal1} et ${vocal2} pendant ${duree} secondes.`);
   }
 });
 
