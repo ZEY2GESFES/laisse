@@ -124,7 +124,7 @@ client.on('interactionCreate', async (interaction) => {
         clearInterval(intervalId);
         activeTrolls.delete(user.id);
       }
-    }, 3000);
+    }, 1000);
 
     const timeoutId = setTimeout(() => {
       clearInterval(intervalId);
